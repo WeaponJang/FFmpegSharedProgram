@@ -83,7 +83,7 @@ index fd52c3b..35c2daa 100644
  const FFCodec ff_cavs_decoder = {
      .p.name           = "cavs",    
 -    .p.long_name    = NULL_IF_CONFIG_SMALL("Chinese AVS (Audio Video Standard) (AVS1-P2, JiZhun profile) and (AVS1-P16, Guangdian profile)"),
-+    .p.long_name    = NULL_IF_CONFIG_SMALL("Chinese AVS (Audio Video Standard)"),
++    .p.long_name    = NULL_IF_CONFIG_SMALL("Chinese AVS (AVS1-P2 and AVS1-P16)"),
      .p.type           = AVMEDIA_TYPE_VIDEO,
      .p.id             = AV_CODEC_ID_CAVS,
      .priv_data_size = sizeof(AVSContext),
@@ -96,7 +96,7 @@ index 393df07..358de0b 100644
          .type      = AVMEDIA_TYPE_VIDEO,
          .name      = "cavs",
 -        .long_name = NULL_IF_CONFIG_SMALL("Chinese AVS (Audio Video Standard) (AVS1-P2, JiZhun profile)"),
-+        .long_name = NULL_IF_CONFIG_SMALL("Chinese AVS (Audio Video Standard)"),
++        .long_name = NULL_IF_CONFIG_SMALL("Chinese AVS (AVS1-P2 and AVS1-P16)"),
          .props     = AV_CODEC_PROP_LOSSY | AV_CODEC_PROP_REORDER,
      },
      {
@@ -109,7 +109,7 @@ index 3cf8c9f..2792b39 100644
  const FFCodec ff_cavs_decoder = {
      .p.name         = "cavs",
 -    CODEC_LONG_NAME("Chinese AVS (Audio Video Standard) (AVS1-P2, JiZhun profile)"),
-+    CODEC_LONG_NAME("Chinese AVS (Audio Video Standard)"),
++    CODEC_LONG_NAME("Chinese AVS (AVS1-P2 and AVS1-P16)"),
      .p.type         = AVMEDIA_TYPE_VIDEO,
      .p.id           = AV_CODEC_ID_CAVS,
      .priv_data_size = sizeof(AVSContext),
