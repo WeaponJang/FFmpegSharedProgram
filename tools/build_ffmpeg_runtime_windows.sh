@@ -378,6 +378,8 @@ CONFIGURE_FLAGS=(
   --enable-demuxers
   --enable-encoders
   --enable-w32threads
+  --enable-d3d11va
+  --enable-dxva2
   --extra-ldflags="-static-libgcc -static-libstdc++"
   --extra-libs="-Wl,-Bstatic -lstdc++ -lm -lz -lwinpthread -Wl,-Bdynamic"
   --pkg-config-flags="--shared"
@@ -438,6 +440,7 @@ is_system_dll() {
 {
   echo "FFmpeg version: $FFMPEG_VERSION"
   echo "License flavor: $LICENSE_FLAVOR"
+  echo "Hardware decoding: D3D11VA, DXVA2"
   echo "Enable libuavs3d: true"
   echo "libuavs3d linkage: static"
   echo "libuavs3d revision: $UAVS3D_GIT_REF"
