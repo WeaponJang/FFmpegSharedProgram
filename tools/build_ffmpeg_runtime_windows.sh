@@ -272,7 +272,10 @@ CONFIGURE_FLAGS=(
   --enable-d3d11va
   --enable-dxva2
   --extra-ldflags=-static-libgcc\ -static-libstdc++
-  "--extra-libs=-Wl,-Bstatic -lstdc++ -lwinpthread -Wl,-Bdynamic"
+  # FFmpeg 9's LINK rule switches to g++ and removes explicit -lstdc++.
+  # Keep static selection for the runtime libraries appended by that driver;
+  # restoring -Bdynamic here allows a late libwinpthread-1.dll dependency.
+  "--extra-libs=-Wl,-Bstatic -lstdc++ -lwinpthread"
 )
 
 if [[ "$LICENSE_FLAVOR" == "gpl" ]]; then
