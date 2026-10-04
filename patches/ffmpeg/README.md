@@ -20,6 +20,16 @@ Changes for FFmpeg 9:
   without retaining compressed payloads. Frame reordering, drain and seek use
   the originating properties, including `AV_CODEC_FLAG_COPY_OPAQUE`. An expired
   history entry returns an error rather than assigning a different packet.
+- Probe CAVS directly from the input buffer without a temporary packet copy;
+  remove redundant B-frame pixel copies and duplicate packet-property storage.
+  Propagate invalid sequence-header errors to the caller.
+- Remove the replaced upstream CAVS decoder's unused x86 DSP objects, which
+  otherwise retain unrelated HPEL references and break minimal CAVS builds.
+- Reset DRA queued data and overlap state on seek/flush while retaining its
+  allocated buffer and transform tables. Drain buffered audio at EOF, use
+  negative FFmpeg errors, copy channel layouts with the layout API, and use
+  `memmove` when compacting overlapping input. Reject unsupported output above
+  two channels rather than returning partially initialized PCM.
 - Preserve decoder-side AVS2/AVS3 positions across frame reordering. AVS2/AVS3
   wrappers set their own frame properties instead of inheriting the currently
   submitted packet's opaque value for delayed output. They do not implement

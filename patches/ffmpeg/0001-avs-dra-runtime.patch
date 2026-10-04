@@ -240,15 +240,16 @@ index 668a068..c92074d 100644
      AV_CODEC_ID_DVD_SUBTITLE = 0x17000,
 diff --git a/libavcodec/dradec.c b/libavcodec/dradec.c
 new file mode 100644
-index 0000000..a65a300
+index 0000000..8d5518e
 --- /dev/null
 +++ b/libavcodec/dradec.c
-@@ -0,0 +1,13815 @@
+@@ -0,0 +1,13837 @@
 +#include "dradec.h"
 +
 +#include <stdlib.h>
-+#include <memory.h>
++#include <string.h>
 +#include <math.h>
++#include <limits.h>
 +
 +//Bitstream
 +typedef struct DRABitstream
@@ -13829,6 +13830,23 @@ index 0000000..a65a300
 +	free(pDRADecoder);
 +}
 +
++void DRADecFlush(void* pDecoder)
++{
++    DRADecoder *decoder = pDecoder;
++    if (decoder) {
++        /* Retain transform tables and input capacity; clear queued audio and overlap. */
++        void *mdct256 = decoder->pMDCT256;
++        void *mdct2048 = decoder->pMDCT2048;
++        unsigned char *buffer = decoder->pDataBuffer;
++        int capacity = decoder->nDataBufSize;
++        memset(decoder, 0, sizeof(*decoder));
++        decoder->pMDCT256 = mdct256;
++        decoder->pMDCT2048 = mdct2048;
++        decoder->pDataBuffer = buffer;
++        decoder->nDataBufSize = capacity;
++    }
++}
++
 +int DRADecGetFrameInfo(void* pDecoder, DRAFrameInfo* pDRAFrameInfo)
 +{
 +	DRADecoder* pDRADecoder = (DRADecoder*)pDecoder;
@@ -13860,6 +13878,8 @@ index 0000000..a65a300
 +
 +	unsigned char* pTemp = pDRADecoder->pDataBuffer;
 +	int nLeft = pDRADecoder->nDataBufLen - pDRADecoder->nDataBufPos;
++	if (nLen <= 0 || !pData || nLeft < 0 || nLen > INT_MAX - 4095 - nLeft)
++		return -1;
 +	int nTotal = nLen + nLeft;
 +	if (nTotal > pDRADecoder->nDataBufSize)
 +	{
@@ -13884,7 +13904,7 @@ index 0000000..a65a300
 +	{
 +		if (pDRADecoder->nDataBufPos > 0)
 +		{
-+			memcpy(pTemp, pTemp + pDRADecoder->nDataBufPos, nLeft);
++			memmove(pTemp, pTemp + pDRADecoder->nDataBufPos, nLeft);
 +		}
 +	}
 +	memcpy(pTemp + nLeft, pData, nLen);
@@ -13967,6 +13987,8 @@ index 0000000..a65a300
 +	}
 +
 +	DRAFrameHeader stHeader;
++	if (pDRADecoder->nDataBufLen - pDRADecoder->nDataBufPos < 2)
++		return -1;
 +	unsigned char* pDecodeBuffer = pDRADecoder->pDataBuffer + pDRADecoder->nDataBufPos;
 +	int nDecodeBufLen = pDRADecoder->nDataBufLen - pDRADecoder->nDataBufPos;
 +	while (1)
@@ -14061,10 +14083,10 @@ index 0000000..a65a300
 +}
 diff --git a/libavcodec/dradec.h b/libavcodec/dradec.h
 new file mode 100644
-index 0000000..0acf678
+index 0000000..de33cfe
 --- /dev/null
 +++ b/libavcodec/dradec.h
-@@ -0,0 +1,24 @@
+@@ -0,0 +1,25 @@
 +#pragma once
 +
 +
@@ -14082,6 +14104,7 @@ index 0000000..0acf678
 +
 +void* DRADecCreate(void);
 +void DRADecDestroy(void* pDecoder);
++void DRADecFlush(void* pDecoder);
 +int DRADecGetFrameInfo(void* pDecoder, DRAFrameInfo* pDRAFrameInfo);
 +int DRADecSendData(void* pDecoder, unsigned char* pData, int nLen);
 +int DRADecRecvFrame(void* pDecoder, unsigned char** ppPCMData, int* nPCMLen);
@@ -32853,10 +32876,10 @@ index 0000000..c7d4027
 +#endif
 diff --git a/libavcodec/libcavsdec.c b/libavcodec/libcavsdec.c
 new file mode 100644
-index 0000000..5cd1e94
+index 0000000..8c7b1a1
 --- /dev/null
 +++ b/libavcodec/libcavsdec.c
-@@ -0,0 +1,1018 @@
+@@ -0,0 +1,1001 @@
 +/*
 + * Chinese AVS video (AVS1-P2, JiZhun profile, frame and field) decoder.
 + * Chinese AVS video (AVS1-P16, GuanDian profile, frame and field) decoder.
@@ -32968,8 +32991,7 @@ index 0000000..5cd1e94
 +    int b_delay_frame;
 +    int b_last_delay_frame;
 +
-+    int64_t current_packet_pos;
-+    AVPacket current_packet;
++    int64_t last_packet_pos;
 +    /* Fixed metadata history; never retain encoded packet payloads. */
 +    AVPacket packet_props[CAVS_PACKET_HISTORY_SIZE];
 +    uint64_t packet_serial[CAVS_PACKET_HISTORY_SIZE];
@@ -33022,7 +33044,7 @@ index 0000000..5cd1e94
 +
 +    h->last_frame_error= 0;
 +    h->probe_keyframe = 0;
-+    h->current_packet_pos = -1;
++    h->last_packet_pos = -1;
 +    h->last_output_pts = AV_NOPTS_VALUE;
 +
 +    return 0;
@@ -33031,7 +33053,6 @@ index 0000000..5cd1e94
 +av_cold int ff_libcavs_end(AVCodecContext *avctx) {
 +    AVSContext *h = avctx->priv_data;
 +
-+    av_packet_unref(&h->current_packet);
 +    for (int i = 0; i < CAVS_PACKET_HISTORY_SIZE; i++)
 +        av_packet_unref(&h->packet_props[i]);
 +    av_packet_unref(&h->cur.pkt);
@@ -33229,10 +33250,6 @@ index 0000000..5cd1e94
 +                FFSWAP(AVSFrame, h->cur, h->DPB[1]);
 +                FFSWAP(AVSFrame, h->DPB[0], h->DPB[1]);
 +            }
-+            else /* B frame */
-+            {
-+                decoder_get_cur_frame( h->cur.f, &h->param );
-+            }
 +        }
 +    }
 +    else
@@ -33271,10 +33288,6 @@ index 0000000..5cd1e94
 +                FFSWAP(AVSFrame, h->cur, h->DPB[1]);
 +                FFSWAP(AVSFrame, h->DPB[0], h->DPB[1]);
 +            }
-+            else /* B frame */
-+            {
-+                decoder_get_cur_frame( h->cur.f, &h->param );
-+            }
 +        }
 +    }
 +
@@ -33295,9 +33308,9 @@ index 0000000..5cd1e94
 +    int width, height;
 +    cavs_seq_info si;
 +
-+    cavs_decoder_process( h->p_decoder, h->buf, h->length );
-+
-+    cavs_decoder_get_seq( h->p_decoder,  &si);
++    if (cavs_decoder_process(h->p_decoder, h->buf, h->length) != CAVS_SEQ_HEADER ||
++        cavs_decoder_get_seq(h->p_decoder, &si) < 0)
++        return AVERROR_INVALIDDATA;
 +
 +    h->b_interlaced = si.b_interlaced;
 +    h->profile = si.profile;
@@ -33347,7 +33360,7 @@ index 0000000..5cd1e94
 +    h->b_last_delay_frame = 0;
 +    h->b_delay_frame = 0;
 +    h->last_frame_error = 0;
-+    h->current_packet_pos = -1;
++    h->last_packet_pos = -1;
 +    h->last_output_pts = AV_NOPTS_VALUE;
 +    h->param.output_type = -1;
 +    for (int i = 0; i < CAVS_PACKET_HISTORY_SIZE; i++) {
@@ -33358,7 +33371,6 @@ index 0000000..5cd1e94
 +    av_frame_unref(h->cur.f);
 +    av_frame_unref(h->DPB[0].f);
 +    av_frame_unref(h->DPB[1].f);
-+    av_packet_unref(&h->current_packet);
 +    av_packet_unref(&h->cur.pkt);
 +    av_packet_unref(&h->DPB[0].pkt);
 +    av_packet_unref(&h->DPB[1].pkt);
@@ -33399,16 +33411,13 @@ index 0000000..5cd1e94
 +    int i_pass_idr = 0;
 +    int b_delay_out = 0;
 +    int i_first_adr = 0;
-+    h->current_packet_pos = avpkt->pos;
 +
 +    if (buf_size != 0) {
-+        if (avpkt->pos >= 0 && h->current_packet.pos >= 0 &&
-+            avpkt->pos < h->current_packet.pos)
++        if (avpkt->pos >= 0 && h->last_packet_pos >= 0 &&
++            avpkt->pos < h->last_packet_pos)
 +            h->last_output_pts = AV_NOPTS_VALUE;
 +
-+        av_packet_unref(&h->current_packet);
-+        if ((ret = av_packet_copy_props(&h->current_packet, avpkt)) < 0)
-+            return ret;
++        h->last_packet_pos = avpkt->pos;
 +        h->param.input_serial = ++h->input_serial;
 +        unsigned slot = h->input_serial % CAVS_PACKET_HISTORY_SIZE;
 +        av_packet_unref(&h->packet_props[slot]);
@@ -33420,28 +33429,23 @@ index 0000000..5cd1e94
 +    /* probe frame or field decoded format */
 +    if( !h->b_probe_flag && buf_size != 0 ) /* first probe flag, when finish set it to 1 */
 +    {
-+        uint8_t *p_buffer;
-+        uint8_t *buf_cur, *buf_cur_end;
++        const uint8_t *buf_cur, *buf_cur_end;
 +        int probe_size;
 +        int decode_size;
 +
 +        probe_size = buf_size;
 +        decode_size = probe_size;
 +
-+        /* copy  stream */
-+        p_buffer = (uint8_t*)malloc(buf_size);
-+
-+        memcpy( p_buffer, buf, probe_size );
-+
-+        buf_cur = p_buffer; /* used to cal */
++        /* The bitstream reader copies input into its own scratch buffer. */
++        buf_cur = buf;
 +        buf_cur_end = buf_cur + probe_size;
 +
 +        while( !h->b_probe_flag )
 +        {
-+            buf_cur = (uint8_t*)avpriv_find_start_code((const uint8_t*)buf_cur, (const uint8_t*)buf_cur_end, &stc);
++            buf_cur = avpriv_find_start_code(buf_cur, buf_cur_end, &stc);
 +            if ((stc & 0xFFFFFE00) || buf_cur == buf_cur_end)
 +            {
-+                return FFMAX(0, buf_cur - p_buffer);
++                return FFMAX(0, buf_cur - buf);
 +            }
 +
 +            decode_size = buf_cur_end - buf_cur + 4;
@@ -33449,7 +33453,7 @@ index 0000000..5cd1e94
 +            switch(stc)
 +            {
 +                case CAVS_START_CODE:
-+                    cavs_decoder_init_stream( h->p_decoder, buf_cur - 4, decode_size);
++                    cavs_decoder_init_stream( h->p_decoder, (uint8_t *)buf_cur - 4, decode_size);
 +                    cavs_decoder_get_one_nal( h->p_decoder, h->buf, &h->length );
 +                    ret = cavs_decoder_probe_seq( h->p_decoder, h->buf, h->length );
 +                    if(ret == CAVS_ERROR )
@@ -33459,7 +33463,7 @@ index 0000000..5cd1e94
 +
 +                    break;
 +                case PIC_I_START_CODE:
-+                    cavs_decoder_init_stream( h->p_decoder, buf_cur - 4, decode_size);
++                    cavs_decoder_init_stream( h->p_decoder, (uint8_t *)buf_cur - 4, decode_size);
 +                    cavs_decoder_get_one_nal( h->p_decoder, h->buf, &h->length );
 +                    ret = cavs_decoder_pic_header( h->p_decoder,  h->buf, h->length, &h->param, stc );
 +                    if( ret == CAVS_ERROR )
@@ -33482,7 +33486,7 @@ index 0000000..5cd1e94
 +                    {
 +                        break;
 +                    }
-+                    cavs_decoder_init_stream( h->p_decoder, buf_cur - 4, decode_size);
++                    cavs_decoder_init_stream( h->p_decoder, (uint8_t *)buf_cur - 4, decode_size);
 +                    cavs_decoder_get_one_nal( h->p_decoder, h->buf, &h->length );
 +                    ret = cavs_decoder_pic_header( h->p_decoder,  h->buf, h->length, &h->param, stc );
 +                    if( ret == CAVS_ERROR )
@@ -33497,7 +33501,7 @@ index 0000000..5cd1e94
 +
 +                case EXT_START_CODE:
 +
-+                    cavs_decoder_init_stream( h->p_decoder, buf_cur - 4, decode_size);
++                    cavs_decoder_init_stream( h->p_decoder, (uint8_t *)buf_cur - 4, decode_size);
 +                    cavs_decoder_get_one_nal( h->p_decoder, h->buf, &h->length );
 +
 +                    cavs_decode_extension_data( h );
@@ -33505,7 +33509,7 @@ index 0000000..5cd1e94
 +                    break;
 +
 +                case USER_START_CODE:
-+                    cavs_decoder_init_stream( h->p_decoder, buf_cur - 4, decode_size);
++                    cavs_decoder_init_stream( h->p_decoder, (uint8_t *)buf_cur - 4, decode_size);
 +                    cavs_decoder_get_one_nal( h->p_decoder, h->buf, &h->length );
 +
 +                    cavs_decode_extension_data( h );
@@ -33513,7 +33517,7 @@ index 0000000..5cd1e94
 +                    break;
 +
 +                case VIDEO_EDIT_CODE:
-+                    cavs_decoder_init_stream( h->p_decoder, buf_cur - 4, decode_size);
++                    cavs_decoder_init_stream( h->p_decoder, (uint8_t *)buf_cur - 4, decode_size);
 +                    cavs_decoder_get_one_nal( h->p_decoder, h->buf, &h->length );
 +
 +                    break;
@@ -33524,7 +33528,6 @@ index 0000000..5cd1e94
 +            }
 +        }
 +
-+        free(p_buffer);
 +    }
 +
 +    if (buf_size == 0) {
@@ -33626,7 +33629,9 @@ index 0000000..5cd1e94
 +        case CAVS_START_CODE:
 +            cavs_decoder_init_stream( h->p_decoder, buf_ptr - 4, decode_size);
 +            cavs_decoder_get_one_nal( h->p_decoder, h->buf, &h->length );
-+            cavs_decode_seq_header( h );
++            ret = cavs_decode_seq_header(h);
++            if (ret < 0)
++                return ret;
 +
 +            /* init h->param */
 +            cavs_decoder_param_init( h );
@@ -33634,11 +33639,12 @@ index 0000000..5cd1e94
 +            if( h->param.seq_header_flag == 0 )
 +            {
 +                /* NOTE : must call at first seq header */
-+                cavs_decoder_seq_init( h->p_decoder, &h->param );
++                if (cavs_decoder_seq_init(h->p_decoder, &h->param) < 0)
++                    return AVERROR_EXTERNAL;
 +
 +                /* alloc frame for decoded yuv */
 +                if (cavs_decoder_buffer_init(&h->param) < 0)
-+                    break;
++                    return AVERROR_EXTERNAL;
 +
 +                h->param.seq_header_flag = 1;
 +            }
@@ -34034,183 +34040,111 @@ index 5a605c3..e5e16ec 100644
  };
 diff --git a/libavcodec/libdradec.c b/libavcodec/libdradec.c
 new file mode 100644
-index 0000000..3f2b56a
+index 0000000..a66235b
 --- /dev/null
 +++ b/libavcodec/libdradec.c
-@@ -0,0 +1,176 @@
-+#include <stdlib.h>
-+#include <stdint.h>
-+#include <stdio.h>
-+#include <memory.h>
-+#include <time.h>
-+#include <math.h>
+@@ -0,0 +1,104 @@
++#include <string.h>
 +#include "avcodec.h"
 +#include "codec_internal.h"
 +#include "decode.h"
-+#include "internal.h"
-+
 +#include "dradec.h"
 +
-+#define __min(a,b) (((a) < (b)) ? (a) : (b))
-+
-+typedef struct DRAContext
-+{
-+	void *pDRADecoder;
-+}DRAContext;
++typedef struct DRAContext {
++    void *decoder;
++} DRAContext;
 +
 +static av_cold int dra_decode_init(AVCodecContext *avctx)
 +{
-+    struct DRAContext *s = avctx->priv_data;
++    DRAContext *s = avctx->priv_data;
 +
-+	avctx->frame_size = 1024;
-+	av_channel_layout_default(&avctx->ch_layout, 2);
-+	avctx->sample_fmt = AV_SAMPLE_FMT_S16;
-+
-+	s->pDRADecoder = DRADecCreate();
-+	if(s->pDRADecoder == NULL)
-+	{
-+		return 1;
-+	}
-+
-+	return 0;
++    avctx->frame_size = 1024;
++    av_channel_layout_uninit(&avctx->ch_layout);
++    av_channel_layout_default(&avctx->ch_layout, 2);
++    avctx->sample_fmt = AV_SAMPLE_FMT_S16;
++    s->decoder = DRADecCreate();
++    return s->decoder ? 0 : AVERROR(ENOMEM);
 +}
 +
-+static int dra_decode_frame(AVCodecContext *avctx, AVFrame *data,
-+                                 int *got_frame_ptr, AVPacket *avpkt)
++static int dra_output_frame(AVCodecContext *avctx, AVFrame *frame,
++                            const unsigned char *pcm, int size)
 +{
-+	int ret = 0;
++    DRAContext *s = avctx->priv_data;
++    DRAFrameInfo info;
++    int ret;
 +
-+    uint8_t *buf = avpkt->data;
-+    int buf_size = avpkt->size;
-+	AVFrame *frame     = data;
-+    int dec_len = 0;
-+	DRAFrameInfo dra_frame_info;
++    if (DRADecGetFrameInfo(s->decoder, &info) != 0 ||
++        info.nChannels <= 0 || info.nChannels > 2 || info.nSampleRate <= 0 ||
++        size <= 0 || size % (info.nChannels * 2))
++        return AVERROR_INVALIDDATA;
 +
-+    struct DRAContext *s = avctx->priv_data;
++    avctx->sample_rate = info.nSampleRate;
++    av_channel_layout_uninit(&avctx->ch_layout);
++    av_channel_layout_default(&avctx->ch_layout, info.nChannels);
++    avctx->frame_size = size / (info.nChannels * 2);
++    av_channel_layout_uninit(&frame->ch_layout);
++    ret = av_channel_layout_copy(&frame->ch_layout, &avctx->ch_layout);
++    if (ret < 0)
++        return ret;
++    frame->sample_rate = avctx->sample_rate;
++    frame->nb_samples = avctx->frame_size;
++    frame->format = avctx->sample_fmt;
++    ret = ff_get_buffer(avctx, frame, 0);
++    if (ret < 0)
++        return ret;
++    memcpy(frame->data[0], pcm, size);
++    return 0;
++}
 +
-+	unsigned char *pcm_data = NULL;
-+	int pcm_len = 0;
++static int dra_decode_frame(AVCodecContext *avctx, AVFrame *frame,
++                             int *got_frame, AVPacket *packet)
++{
++    DRAContext *s = avctx->priv_data;
++    unsigned char *pcm = NULL;
++    int size = 0, consumed = 0, ret;
 +
-+    *got_frame_ptr = 0;
++    *got_frame = 0;
++    ret = DRADecRecvFrame(s->decoder, &pcm, &size);
++    if (ret != 0 && packet->size) {
++        if (DRADecSendData(s->decoder, packet->data, packet->size) != 0)
++            return AVERROR_EXTERNAL;
++        consumed = packet->size;
++        ret = DRADecRecvFrame(s->decoder, &pcm, &size);
++    }
++    if (ret == 0) {
++        ret = dra_output_frame(avctx, frame, pcm, size);
++        if (ret < 0)
++            return ret;
++        *got_frame = 1;
++    }
++    return consumed;
++}
 +
-+	if(buf == NULL || buf_size == 0)
-+	{
-+		ret = DRADecRecvFrame(s->pDRADecoder, &pcm_data, &pcm_len);
-+		if(ret == 0)
-+		{
-+			DRADecGetFrameInfo(s->pDRADecoder, &dra_frame_info);
-+			avctx->sample_rate = dra_frame_info.nSampleRate;
-+			av_channel_layout_default(&avctx->ch_layout, dra_frame_info.nChannels);
-+			if(avctx->ch_layout.nb_channels != 0)
-+			{
-+				avctx->frame_size = pcm_len / (avctx->ch_layout.nb_channels * 2);
-+			}
-+
-+			frame->ch_layout = avctx->ch_layout;
-+			frame->sample_rate = avctx->sample_rate;
-+			frame->nb_samples = avctx->frame_size;
-+			frame->format = avctx->sample_fmt;
-+
-+		    if ((ret = ff_get_buffer(avctx, frame, 0)) < 0)
-+		        return ret;
-+
-+		    memcpy(frame->data[0], pcm_data, pcm_len);
-+
-+		    *got_frame_ptr = 1;
-+		}
-+		dec_len = buf_size;
-+	}
-+	else
-+	{
-+		ret = DRADecRecvFrame(s->pDRADecoder, &pcm_data, &pcm_len);
-+		if(ret == 0)
-+		{
-+			DRADecGetFrameInfo(s->pDRADecoder, &dra_frame_info);
-+			avctx->sample_rate = dra_frame_info.nSampleRate;
-+			av_channel_layout_default(&avctx->ch_layout, dra_frame_info.nChannels);
-+			if(avctx->ch_layout.nb_channels != 0)
-+			{
-+				avctx->frame_size = pcm_len / (avctx->ch_layout.nb_channels * 2);
-+			}
-+
-+			frame->ch_layout = avctx->ch_layout;
-+			frame->sample_rate = avctx->sample_rate;
-+			frame->nb_samples = avctx->frame_size;
-+			frame->format = avctx->sample_fmt;
-+
-+		    if ((ret = ff_get_buffer(avctx, frame, 0)) < 0)
-+		        return ret;
-+
-+		    memcpy(frame->data[0], pcm_data, pcm_len);
-+
-+		    *got_frame_ptr = 1;
-+
-+		    dec_len = 0;
-+		}
-+		else
-+		{
-+			ret = DRADecSendData(s->pDRADecoder, buf, buf_size);
-+			if(ret != 0)
-+			{
-+				return AVERROR(AVERROR_BUG);
-+			}
-+
-+			ret = DRADecRecvFrame(s->pDRADecoder, &pcm_data, &pcm_len);
-+			if(ret == 0)
-+			{
-+				DRADecGetFrameInfo(s->pDRADecoder, &dra_frame_info);
-+		    	avctx->sample_rate = dra_frame_info.nSampleRate;
-+				av_channel_layout_default(&avctx->ch_layout, dra_frame_info.nChannels);
-+				if(avctx->ch_layout.nb_channels != 0)
-+				{
-+					avctx->frame_size = pcm_len / (avctx->ch_layout.nb_channels * 2);
-+				}
-+
-+				frame->ch_layout = avctx->ch_layout;
-+
-+				frame->ch_layout = avctx->ch_layout;
-+				frame->sample_rate = avctx->sample_rate;
-+		    	frame->nb_samples = avctx->frame_size;
-+		    	frame->format = avctx->sample_fmt;
-+
-+			    if ((ret = ff_get_buffer(avctx, frame, 0)) < 0)
-+			        return ret;
-+
-+			    memcpy(frame->data[0], pcm_data, pcm_len);
-+
-+			    *got_frame_ptr = 1;
-+			}
-+
-+			dec_len = buf_size;
-+		}
-+	}
-+
-+	return dec_len;
++static void dra_decode_flush(AVCodecContext *avctx)
++{
++    DRAContext *s = avctx->priv_data;
++    DRADecFlush(s->decoder);
 +}
 +
 +static av_cold int dra_decode_end(AVCodecContext *avctx)
 +{
-+	struct DRAContext *s = avctx->priv_data;
-+
-+	if(s->pDRADecoder)
-+	{
-+		DRADecDestroy(s->pDRADecoder);
-+		s->pDRADecoder = NULL;
-+	}
-+
++    DRAContext *s = avctx->priv_data;
++    DRADecDestroy(s->decoder);
++    s->decoder = NULL;
 +    return 0;
 +}
 +
 +const FFCodec ff_libdra_decoder = {
-+    .p.name           = "libdra",
-+    .p.long_name    = NULL_IF_CONFIG_SMALL("dra audio decoder"),
-+    .p.type           = AVMEDIA_TYPE_AUDIO,
-+    .p.id             = AV_CODEC_ID_DRA,
++    .p.name         = "libdra",
++    CODEC_LONG_NAME("DRA audio decoder"),
++    .p.type         = AVMEDIA_TYPE_AUDIO,
++    .p.id           = AV_CODEC_ID_DRA,
 +    .priv_data_size = sizeof(DRAContext),
 +    .init           = dra_decode_init,
 +    .close          = dra_decode_end,
++    .flush          = dra_decode_flush,
 +    FF_CODEC_DECODE_CB(dra_decode_frame),
-+    .p.capabilities   = AV_CODEC_CAP_CHANNEL_CONF | AV_CODEC_CAP_DR1,
++    .p.capabilities = AV_CODEC_CAP_CHANNEL_CONF | AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY,
 +    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 +    CODEC_SAMPLEFMTS(AV_SAMPLE_FMT_S16),
 +};
@@ -34297,6 +34231,25 @@ index 3eea205..f45bc11 100644
      .flush          = libuavs3d_flush,
      .p.wrapper_name = "libuavs3d",
  };
+diff --git a/libavcodec/x86/Makefile b/libavcodec/x86/Makefile
+--- a/libavcodec/x86/Makefile
++++ b/libavcodec/x86/Makefile
+@@ -49,7 +49,6 @@
+ X86ASM-OBJS-$(CONFIG_ALAC_DECODER)     += x86/alacdsp_init.o
+ X86ASM-OBJS-$(CONFIG_APNG_DECODER)     += x86/pngdsp_init.o
+ X86ASM-OBJS-$(CONFIG_APV_DECODER)      += x86/apv_dsp_init.o
+-X86ASM-OBJS-$(CONFIG_CAVS_DECODER)     += x86/cavsdsp.o
+ X86ASM-OBJS-$(CONFIG_CFHD_DECODER)     += x86/cfhddsp_init.o
+ X86ASM-OBJS-$(CONFIG_CFHD_ENCODER)     += x86/cfhdencdsp_init.o
+ X86ASM-OBJS-$(CONFIG_DCA_DECODER)      += x86/dcadsp_init.o x86/synth_filter_init.o
+@@ -151,7 +150,6 @@
+ X86ASM-OBJS-$(CONFIG_ALAC_DECODER)     += x86/alacdsp.o
+ X86ASM-OBJS-$(CONFIG_APNG_DECODER)     += x86/pngdsp.o
+ X86ASM-OBJS-$(CONFIG_APV_DECODER)      += x86/apv_dsp.o
+-X86ASM-OBJS-$(CONFIG_CAVS_DECODER)     += x86/cavsidct.o x86/cavs_qpel.o
+ X86ASM-OBJS-$(CONFIG_CFHD_ENCODER)     += x86/cfhdencdsp.o
+ X86ASM-OBJS-$(CONFIG_CFHD_DECODER)     += x86/cfhddsp.o
+ X86ASM-OBJS-$(CONFIG_DCA_DECODER)      += x86/dcadsp.o x86/synth_filter.o
 diff --git a/libavformat/cavsvideodec.c b/libavformat/cavsvideodec.c
 index b89851f..99fb9a9 100644
 --- a/libavformat/cavsvideodec.c

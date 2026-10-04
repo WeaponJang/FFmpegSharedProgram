@@ -22,7 +22,7 @@ static int decode_window(AVFormatContext *input, AVCodecContext *decoder,
                          int stream, int limit, int export_pos)
 {
     SeenPacket seen[2048];
-    unsigned sent = 0;
+    unsigned sent = 0, read_packets = 0;
     int frames = 0, keys = 0, errors = 0, draining = 0, positioned = 0;
     AVPacket *packet = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
@@ -85,6 +85,11 @@ static int decode_window(AVFormatContext *input, AVCodecContext *decoder,
             goto end;
         }
         do {
+            if (read_packets++ >= 100000) {
+                fprintf(stderr, "Input packet budget exceeded while selecting stream %d\n", stream);
+                ret = AVERROR_INVALIDDATA;
+                goto end;
+            }
             av_packet_unref(packet);
             ret = av_read_frame(input, packet);
         } while (ret >= 0 && packet->stream_index != stream);

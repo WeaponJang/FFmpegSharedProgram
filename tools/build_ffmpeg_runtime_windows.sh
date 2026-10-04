@@ -92,7 +92,48 @@ SYSTEM_DLL_PATTERNS=(
   EXT-MS-WIN-*.DLL
 )
 
+# FFmpeg 9's LINK macro removes standalone -lstdc++ and appends it through
+# g++. Keep the complete static group in one linker argument so libstdc++
+# precedes winpthread even when FFmpeg selects the C++ driver.
+STATIC_CXX_LIBS="-Wl,-Bstatic,-lstdc++,-lwinpthread,-Bdynamic"
+
+dll_dependencies() {
+  objdump -p "$1" | awk '/DLL Name:/{print $3}' | sort -u
+}
+
+is_system_dll() {
+  local dependency_upper="$1"
+  local pattern
+
+  for pattern in "${SYSTEM_DLL_PATTERNS[@]}"; do
+    if [[ "$dependency_upper" == $pattern ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 mkdir -p "$SOURCE_ROOT" "$INSTALL_ROOT" "$RUNTIME_ROOT" "$ARTIFACT_ROOT"
+
+# Exercise real C++/pthread references before building the decoder libraries.
+# Check both drivers: FFmpeg uses gcc normally and g++ for C++ filters.
+g++ -O2 -c "$SCRIPT_DIR/verify_windows_linkage.cpp" -o "$WORK_ROOT/linkage-probe.o"
+for driver in gcc g++; do
+  "$driver" -static-libgcc -static-libstdc++ "$WORK_ROOT/linkage-probe.o" \
+    "$STATIC_CXX_LIBS" -o "$WORK_ROOT/linkage-probe.exe"
+  objdump -p "$WORK_ROOT/linkage-probe.exe" > "$WORK_ROOT/linkage-probe.imports.txt"
+  while IFS= read -r dependency; do
+    dependency_upper="$(printf '%s' "$dependency" | tr '[:lower:]' '[:upper:]')"
+    if ! is_system_dll "$dependency_upper"; then
+      cat "$WORK_ROOT/linkage-probe.imports.txt" >&2
+      echo "Unexpected $driver runtime dependency: $dependency" >&2
+      exit 1
+    fi
+  done < <(dll_dependencies "$WORK_ROOT/linkage-probe.exe")
+  "$WORK_ROOT/linkage-probe.exe"
+done
+rm -f "$WORK_ROOT/linkage-probe.o" "$WORK_ROOT/linkage-probe.exe" "$WORK_ROOT/linkage-probe.imports.txt"
 
 if [[ ! -f "$SOURCE_ARCHIVE" ]]; then
   curl -fL --retry 3 "$SOURCE_URL" -o "$SOURCE_ARCHIVE"
@@ -210,7 +251,7 @@ includedir=\${prefix}/include
 Name: davs2
 Description: AVS2 (IEEE 1857.4) decoder library
 Version: 1.6.0
-Libs: -L\${libdir} -ldavs2 -Wl,-Bstatic -lstdc++ -lwinpthread -Wl,-Bdynamic
+Libs: -L\${libdir} -ldavs2 $STATIC_CXX_LIBS
 Cflags: -I\${includedir}
 EOF
 
@@ -272,10 +313,7 @@ CONFIGURE_FLAGS=(
   --enable-d3d11va
   --enable-dxva2
   --extra-ldflags=-static-libgcc\ -static-libstdc++
-  # FFmpeg 9's LINK rule switches to g++ and removes explicit -lstdc++.
-  # Keep static selection for the runtime libraries appended by that driver;
-  # restoring -Bdynamic here allows a late libwinpthread-1.dll dependency.
-  "--extra-libs=-Wl,-Bstatic -lstdc++ -lwinpthread"
+  "--extra-libs=$STATIC_CXX_LIBS"
 )
 
 if [[ "$LICENSE_FLAVOR" == "gpl" ]]; then
@@ -335,23 +373,6 @@ for library_name in "${LIBRARY_NAMES[@]}"; do
   chmod u+w "$RUNTIME_ROOT/$library_name"
 done
 
-dll_dependencies() {
-  objdump -p "$1" | awk '/DLL Name:/{print $3}' | sort -u
-}
-
-is_system_dll() {
-  local dependency_upper="$1"
-  local pattern
-
-  for pattern in "${SYSTEM_DLL_PATTERNS[@]}"; do
-    if [[ "$dependency_upper" == $pattern ]]; then
-      return 0
-    fi
-  done
-
-  return 1
-}
-
 {
   echo "FFmpeg version: $FFMPEG_VERSION"
   echo "License flavor: $LICENSE_FLAVOR"
@@ -393,6 +414,7 @@ for dll in "$RUNTIME_ROOT"/*.dll; do
     fi
 
     if ! is_system_dll "$dependency_upper"; then
+      objdump -p "$dll" >&2
       echo "Unexpected external dependency in $(basename "$dll"): $dependency" >&2
       exit 1
     fi

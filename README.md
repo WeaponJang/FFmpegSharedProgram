@@ -71,6 +71,12 @@ All workflows compile and run `tools/verify_runtime.c` against the **packaged**
 runtime before uploading it. This checks loading, ABI majors and registration of
 `cavs`, `libdra`, `libdavs2` and `libuavs3d` in the GPL builds.
 
+The Windows build first checks static C++/pthread linkage with both GCC drivers
+using `tools/verify_windows_linkage.cpp`, including a thread and an exception.
+The complete static library group is passed as one linker argument so FFmpeg
+9's C++ driver selection cannot reorder the runtime libraries. Packaged DLLs
+must still pass the final dependency check.
+
 The verifier also accepts a local sample. It decodes a bounded window, checks
 packet position metadata and key-packet provenance, then seeks, flushes and
 decodes another window with position export disabled. For example, after a
