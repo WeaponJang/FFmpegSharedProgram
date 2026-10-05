@@ -369,7 +369,7 @@ for library_name in "${LIBRARY_NAMES[@]}"; do
     echo "Missing expected FFmpeg runtime library: $library_name" >&2
     exit 1
   fi
-  cp -L "$INSTALL_ROOT/bin/"*.exe "$RUNTIME_ROOT/"
+  
   cp -L "$source_path" "$RUNTIME_ROOT/$library_name"
   chmod u+w "$RUNTIME_ROOT/$library_name"
 done
