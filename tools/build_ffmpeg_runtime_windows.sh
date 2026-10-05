@@ -61,6 +61,7 @@ if [[ ! "$CPU_COUNT" =~ ^[1-9][0-9]*$ ]]; then
   echo "BUILD_JOBS must be a positive integer" >&2
   exit 1
 fi
+
 # Keep peak compiler memory bounded; an explicit BUILD_JOBS overrides the cap.
 if [[ -z "${BUILD_JOBS:-}" && "$CPU_COUNT" -gt 4 ]]; then
   CPU_COUNT=4
