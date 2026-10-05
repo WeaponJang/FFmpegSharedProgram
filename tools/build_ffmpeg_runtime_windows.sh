@@ -47,7 +47,7 @@ INSTALL_ROOT="$WORK_ROOT/install"
 PACKAGE_ROOT="$WORK_ROOT/package"
 RUNTIME_ROOT="$PACKAGE_ROOT"
 ARTIFACT_ROOT="$WORK_ROOT/artifacts"
-PACKAGE_NAME="ffmpeg-runtime-win64-$LICENSE_FLAVOR-shared-$FFMPEG_VERSION"
+PACKAGE_NAME="ffmpeg-win64-$LICENSE_FLAVOR-shared-$FFMPEG_VERSION"
 ARTIFACT_PATH="$ARTIFACT_ROOT/$PACKAGE_NAME.zip"
 PKG_CONFIG_BIN="${PKG_CONFIG_BIN:-pkgconf}"
 CPU_COUNT="${BUILD_JOBS:-$(nproc)}"
@@ -366,7 +366,7 @@ done
     dll_dependencies "$dll"
     echo
   done
-} >"$ARTIFACT_ROOT/$PACKAGE_NAME.manifest.txt"
+} >"$ARTIFACT_ROOT/$.manifest.txt"
 
 
 (
