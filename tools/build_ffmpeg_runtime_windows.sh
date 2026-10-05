@@ -66,15 +66,11 @@ if [[ -z "${BUILD_JOBS:-}" && "$CPU_COUNT" -gt 4 ]]; then
   CPU_COUNT=4
 fi
 
-LIBRARY_NAMES=(
-  avutil-61.dll
-  swresample-7.dll
-  swscale-10.dll
-  avcodec-63.dll
-  avformat-63.dll
-  avfilter-12.dll
-  avdevice-63.dll
-)
+LIBRARY_NAMES=()
+while IFS= read -r f; do
+    LIBRARY_NAMES+=("$(basename "$f")")
+done < <(find "$INSTALL_ROOT/bin" -maxdepth 1 -type f \( -name '*.dll' -o -name '*.exe' \) | sort)
+
 
 SYSTEM_DLL_PATTERNS=(
   KERNEL32.DLL
@@ -373,7 +369,7 @@ for library_name in "${LIBRARY_NAMES[@]}"; do
     echo "Missing expected FFmpeg runtime library: $library_name" >&2
     exit 1
   fi
-
+  cp -L "$INSTALL_ROOT/bin/"*.exe "$RUNTIME_ROOT/"
   cp -L "$source_path" "$RUNTIME_ROOT/$library_name"
   chmod u+w "$RUNTIME_ROOT/$library_name"
 done
@@ -428,6 +424,6 @@ done
 
 (
   cd "$PACKAGE_ROOT"
-  zip -qj "$ARTIFACT_PATH" ./*.dll
+  zip -qj "$ARTIFACT_PATH" ./*.dll  ./*.exe
 )
 echo "Created artifact: $ARTIFACT_PATH"
