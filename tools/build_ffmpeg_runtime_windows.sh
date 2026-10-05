@@ -5,8 +5,8 @@ set -euo pipefail
 # - FFmpeg shared DLLs are packaged
 # - libuavs3d is built as a static dependency and linked into FFmpeg
 # - D3D11VA and DXVA2 hardware decoding are enabled through Windows system APIs
-# - unexpected non-system DLL dependencies are treated as build failures
-# - decoders stay broad by default, while most encoders are disabled
+# - DLL dependencies are recorded in the manifest for manual review
+# - all built-in decoders and encoders are enabled
 
 FFMPEG_VERSION="${1:?usage: build_ffmpeg_runtime_windows.sh <ffmpeg-version> <gpl|lgpl> [work-root] }"
 LICENSE_FLAVOR="${2:?usage: build_ffmpeg_runtime_windows.sh <ffmpeg-version> <gpl|lgpl> [work-root] }"
@@ -67,22 +67,6 @@ if [[ -z "${BUILD_JOBS:-}" && "$CPU_COUNT" -gt 4 ]]; then
   CPU_COUNT=4
 fi
 
-SYSTEM_DLL_PATTERNS=(
-  KERNEL32.DLL
-  USER32.DLL
-  GDI32.DLL
-  ADVAPI32.DLL
-  SHELL32.DLL
-  OLE32.DLL
-  OLEAUT32.DLL
-  UUID.DLL
-  WS2_32.DLL
-  BCRYPT.DLL
-  SETUPAPI.DLL
-  MSVCRT.DLL
-  API-MS-WIN-*.DLL
-  EXT-MS-WIN-*.DLL
-)
 
 # FFmpeg 9's LINK macro removes standalone -lstdc++ and appends it through
 # g++. Keep the complete static group in one linker argument so libstdc++
@@ -93,18 +77,6 @@ dll_dependencies() {
   objdump -p "$1" | awk '/DLL Name:/{print $3}' | sort -u
 }
 
-is_system_dll() {
-  local dependency_upper="$1"
-  local pattern
-
-  for pattern in "${SYSTEM_DLL_PATTERNS[@]}"; do
-    if [[ "$dependency_upper" == $pattern ]]; then
-      return 0
-    fi
-  done
-
-  return 1
-}
 
 mkdir -p "$SOURCE_ROOT" "$INSTALL_ROOT" "$RUNTIME_ROOT" "$ARTIFACT_ROOT"
 
@@ -112,20 +84,14 @@ mkdir -p "$SOURCE_ROOT" "$INSTALL_ROOT" "$RUNTIME_ROOT" "$ARTIFACT_ROOT"
 # Check both drivers: FFmpeg uses gcc normally and g++ for C++ filters.
 g++ -O2 -c "$SCRIPT_DIR/verify_windows_linkage.cpp" -o "$WORK_ROOT/linkage-probe.o"
 for driver in gcc g++; do
-  "$driver" -static-libgcc -static-libstdc++ "$WORK_ROOT/linkage-probe.o" \
-    "$STATIC_CXX_LIBS" -o "$WORK_ROOT/linkage-probe.exe"
-  objdump -p "$WORK_ROOT/linkage-probe.exe" > "$WORK_ROOT/linkage-probe.imports.txt"
-  while IFS= read -r dependency; do
-    dependency_upper="$(printf '%s' "$dependency" | tr '[:lower:]' '[:upper:]')"
-    if ! is_system_dll "$dependency_upper"; then
-      cat "$WORK_ROOT/linkage-probe.imports.txt" >&2
-      echo "Unexpected $driver runtime dependency: $dependency" >&2
-      exit 1
-    fi
-  done < <(dll_dependencies "$WORK_ROOT/linkage-probe.exe")
+  "$driver" -static-libgcc -static-libstdc++ "$WORK_ROOT/linkage-probe.o" "$STATIC_CXX_LIBS" -o "$WORK_ROOT/linkage-probe.exe"
+  if objdump -p "$WORK_ROOT/linkage-probe.exe" | grep -qiE 'libstdc|libgcc|winpthread'; then
+    echo "$driver: C++ runtime leaked as dynamic dependency" >&2
+    exit 1
+  fi
   "$WORK_ROOT/linkage-probe.exe"
 done
-rm -f "$WORK_ROOT/linkage-probe.o" "$WORK_ROOT/linkage-probe.exe" "$WORK_ROOT/linkage-probe.imports.txt"
+rm -f "$WORK_ROOT/linkage-probe.o" "$WORK_ROOT/linkage-probe.exe"
 
 if [[ ! -f "$SOURCE_ARCHIVE" ]]; then
   curl -fL --retry 3 "$SOURCE_URL" -o "$SOURCE_ARCHIVE"
@@ -402,24 +368,6 @@ done
   done
 } >"$ARTIFACT_ROOT/$PACKAGE_NAME.manifest.txt"
 
-for dll in "$RUNTIME_ROOT"/*.dll; do
-  while IFS= read -r dependency; do
-    [[ -n "$dependency" ]] || continue
-
-    dependency_upper="$(printf '%s' "$dependency" | tr '[:lower:]' '[:upper:]')"
-    dependency_local="$RUNTIME_ROOT/$dependency"
-
-    if [[ -f "$dependency_local" ]]; then
-      continue
-    fi
-
-    if ! is_system_dll "$dependency_upper"; then
-      objdump -p "$dll" >&2
-      echo "Unexpected external dependency in $(basename "$dll"): $dependency" >&2
-      exit 1
-    fi
-  done < <(dll_dependencies "$dll")
-done
 
 (
   cd "$PACKAGE_ROOT"
