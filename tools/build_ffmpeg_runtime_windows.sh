@@ -303,7 +303,8 @@ CONFIGURE_FLAGS=(
   --pkg-config="$PKG_CONFIG_BIN"
   --enable-shared
   --disable-static
-  --disable-programs
+  --enable-ffmpeg
+  --enable-ffprobe
   --disable-doc
   --disable-debug
   --disable-autodetect
