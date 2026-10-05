@@ -66,12 +66,6 @@ if [[ -z "${BUILD_JOBS:-}" && "$CPU_COUNT" -gt 4 ]]; then
   CPU_COUNT=4
 fi
 
-LIBRARY_NAMES=()
-while IFS= read -r f; do
-    LIBRARY_NAMES+=("$(basename "$f")")
-done < <(find "$INSTALL_ROOT/bin" -maxdepth 1 -type f \( -name '*.dll' -o -name '*.exe' \) | sort)
-
-
 SYSTEM_DLL_PATTERNS=(
   KERNEL32.DLL
   USER32.DLL
@@ -362,6 +356,11 @@ make -j"$CPU_COUNT"
 make install
 
 popd >/dev/null
+
+LIBRARY_NAMES=()
+while IFS= read -r f; do
+    LIBRARY_NAMES+=("$(basename "$f")")
+done < <(find "$INSTALL_ROOT/bin" -maxdepth 1 -type f \( -name '*.dll' -o -name '*.exe' \) | sort)
 
 for library_name in "${LIBRARY_NAMES[@]}"; do
   source_path="$INSTALL_ROOT/bin/$library_name"
