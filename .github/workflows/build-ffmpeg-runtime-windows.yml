@@ -33,7 +33,6 @@ jobs:
             mingw-w64-x86_64-nasm
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-pkgconf
-            mingw-w64-x86_64-yasm
 
       - name: Build runtime
         shell: msys2 {0}
