@@ -319,12 +319,10 @@ CONFIGURE_FLAGS=(
   --disable-debug
   --disable-autodetect
   --disable-ffplay
-  --disable-network
+  --enable-network
   --disable-indevs
   --disable-outdevs
   --disable-devices
-  --disable-encoders
-  --enable-encoder=png,mjpeg,bmp
   --enable-d3d11va
   --enable-dxva2
   --extra-ldflags=-static-libgcc\ -static-libstdc++
