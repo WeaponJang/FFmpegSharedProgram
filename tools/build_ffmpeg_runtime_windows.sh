@@ -2,6 +2,7 @@
 set -euo pipefail
 
 # Build a self-contained Windows x64 FFmpeg runtime:
+# - ffmpeg.exe and ffprobe.exe are built and packaged next to the DLLs
 # - FFmpeg shared DLLs are packaged
 # - libuavs3d is built as a static dependency and linked into FFmpeg
 # - D3D11VA and DXVA2 hardware decoding are enabled through Windows system APIs
@@ -75,6 +76,12 @@ LIBRARY_NAMES=(
   avformat-63.dll
   avfilter-12.dll
   avdevice-63.dll
+)
+
+# ffplay stays disabled: it needs SDL, which is not part of this runtime.
+PROGRAM_NAMES=(
+  ffmpeg.exe
+  ffprobe.exe
 )
 
 SYSTEM_DLL_PATTERNS=(
@@ -306,7 +313,8 @@ CONFIGURE_FLAGS=(
   --pkg-config="$PKG_CONFIG_BIN"
   --enable-shared
   --disable-static
-  --disable-programs
+  --enable-ffmpeg
+  --enable-ffprobe
   --disable-doc
   --disable-debug
   --disable-autodetect
@@ -380,6 +388,18 @@ for library_name in "${LIBRARY_NAMES[@]}"; do
   chmod u+w "$RUNTIME_ROOT/$library_name"
 done
 
+# The executables link against the packaged DLLs and must ship beside them.
+for program_name in "${PROGRAM_NAMES[@]}"; do
+  source_path="$INSTALL_ROOT/bin/$program_name"
+  if [[ ! -f "$source_path" ]]; then
+    echo "Missing expected FFmpeg program: $program_name" >&2
+    exit 1
+  fi
+
+  cp -L "$source_path" "$RUNTIME_ROOT/$program_name"
+  chmod u+w "$RUNTIME_ROOT/$program_name"
+done
+
 {
   echo "FFmpeg version: $FFMPEG_VERSION"
   echo "License flavor: $LICENSE_FLAVOR"
@@ -398,18 +418,21 @@ done
   echo "Configure flags:"
   printf '  %s\n' "${CONFIGURE_FLAGS[@]}"
   echo
+  echo "Bundled executables:"
+  find "$RUNTIME_ROOT" -maxdepth 1 -type f -name '*.exe' -print | sort
+  echo
   echo "Bundled DLLs:"
   find "$RUNTIME_ROOT" -maxdepth 1 -type f -name '*.dll' -print | sort
   echo
   echo "Dependency report:"
-  for dll in "$RUNTIME_ROOT"/*.dll; do
-    echo "## $(basename "$dll")"
-    dll_dependencies "$dll"
+  for binary in "$RUNTIME_ROOT"/*.exe "$RUNTIME_ROOT"/*.dll; do
+    echo "## $(basename "$binary")"
+    dll_dependencies "$binary"
     echo
   done
 } >"$ARTIFACT_ROOT/$PACKAGE_NAME.manifest.txt"
 
-for dll in "$RUNTIME_ROOT"/*.dll; do
+for binary in "$RUNTIME_ROOT"/*.exe "$RUNTIME_ROOT"/*.dll; do
   while IFS= read -r dependency; do
     [[ -n "$dependency" ]] || continue
 
@@ -421,15 +444,19 @@ for dll in "$RUNTIME_ROOT"/*.dll; do
     fi
 
     if ! is_system_dll "$dependency_upper"; then
-      objdump -p "$dll" >&2
-      echo "Unexpected external dependency in $(basename "$dll"): $dependency" >&2
+      objdump -p "$binary" >&2
+      echo "Unexpected external dependency in $(basename "$binary"): $dependency" >&2
       exit 1
     fi
-  done < <(dll_dependencies "$dll")
+  done < <(dll_dependencies "$binary")
 done
+
+# Smoke test: after the import table is verified, the packaged executable must
+# also load the bundled DLLs from its own directory.
+"$RUNTIME_ROOT/ffmpeg.exe" -hide_banner -version >"$ARTIFACT_ROOT/$PACKAGE_NAME.version.txt"
 
 (
   cd "$PACKAGE_ROOT"
-  zip -qj "$ARTIFACT_PATH" ./*.dll
+  zip -qj "$ARTIFACT_PATH" ./*.exe ./*.dll
 )
 echo "Created artifact: $ARTIFACT_PATH"
