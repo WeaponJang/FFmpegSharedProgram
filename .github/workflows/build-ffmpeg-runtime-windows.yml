@@ -1,4 +1,4 @@
-name: FFmpeg Runtime Windows win64 (9.0.2 GPL)
+name: FFmpeg Program Windows win64 (9.0.2 GPL)
 
 on:
   workflow_dispatch:
@@ -47,7 +47,7 @@ jobs:
       - name: Upload runtime artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-runtime-win64-${{ env.LICENSE_FLAVOR }}-shared-${{ env.FFMPEG_VERSION }}
+          name: ffmpeg-exe-win64-${{ env.LICENSE_FLAVOR }}-shared-${{ env.FFMPEG_VERSION }}
           path: ${{ runner.temp }}\ffmpeg-runtime-build\artifacts\*.zip
           if-no-files-found: error
           retention-days: 14
