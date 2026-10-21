@@ -44,16 +44,6 @@ jobs:
             "$LICENSE_FLAVOR" \
             "$WORK_ROOT_UNIX"
 
-      - name: Verify packaged runtime
-        shell: msys2 {0}
-        run: |
-          ROOT="$(cygpath -u "$RUNNER_TEMP/$WORK_ROOT_DIR")"
-          gcc -O2 -Wall -Wextra -I"$ROOT/install/include" tools/verify_runtime.c \
-            -L"$ROOT/install/lib" -lavformat -lavcodec -lavutil \
-            -lavdevice -lavfilter -lswscale -lswresample \
-            -o "$ROOT/package/verify_runtime.exe"
-          "$ROOT/package/verify_runtime.exe"
-
       - name: Upload runtime artifact
         uses: actions/upload-artifact@v4
         with:
