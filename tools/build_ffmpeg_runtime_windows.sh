@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Build a self-contained Windows x64 FFmpeg runtime:
-# - FFmpeg shared DLLs are packaged
+# - FFmpeg shared DLLs and command-line executables are packaged
 # - libuavs3d is built as a static dependency and linked into FFmpeg
 # - D3D11VA and DXVA2 hardware decoding are enabled through Windows system APIs
 # - unexpected non-system DLL dependencies are treated as build failures
@@ -57,7 +57,7 @@ INSTALL_ROOT="$WORK_ROOT/install"
 PACKAGE_ROOT="$WORK_ROOT/package"
 RUNTIME_ROOT="$PACKAGE_ROOT"
 ARTIFACT_ROOT="$WORK_ROOT/artifacts"
-PACKAGE_NAME="ffmpeg-runtime-win64-$LICENSE_FLAVOR-shared-$FFMPEG_VERSION"
+PACKAGE_NAME="ffmpeg-exe-win64-$LICENSE_FLAVOR-shared-$FFMPEG_VERSION"
 ARTIFACT_PATH="$ARTIFACT_ROOT/$PACKAGE_NAME.zip"
 PKG_CONFIG_BIN="${PKG_CONFIG_BIN:-pkgconf}"
 CPU_COUNT="${BUILD_JOBS:-$(nproc)}"
@@ -84,6 +84,11 @@ LIBRARY_NAMES=(
   avformat-63.dll
   avfilter-12.dll
   avdevice-63.dll
+)
+
+PROGRAM_NAMES=(
+  ffmpeg.exe
+  ffprobe.exe
 )
 
 SYSTEM_DLL_PATTERNS=(
@@ -356,7 +361,8 @@ CONFIGURE_FLAGS=(
   --pkg-config-flags=--static
   --enable-shared
   --disable-static
-  --disable-programs
+  --enable-decoders
+  --enable-encoders
   --disable-doc
   --disable-debug
   --disable-autodetect
@@ -433,6 +439,17 @@ for library_name in "${LIBRARY_NAMES[@]}"; do
   chmod u+w "$RUNTIME_ROOT/$library_name"
 done
 
+for program_name in "${PROGRAM_NAMES[@]}"; do
+  source_path="$INSTALL_ROOT/bin/$program_name"
+  if [[ ! -f "$source_path" ]]; then
+    echo "Missing expected FFmpeg program: $program_name" >&2
+    exit 1
+  fi
+
+  cp -L "$source_path" "$RUNTIME_ROOT/$program_name"
+  chmod u+w "$RUNTIME_ROOT/$program_name"
+done
+
 {
   echo "FFmpeg version: $FFMPEG_VERSION"
   echo "License flavor: $LICENSE_FLAVOR"
@@ -460,15 +477,18 @@ done
   echo "Bundled DLLs:"
   find "$RUNTIME_ROOT" -maxdepth 1 -type f -name '*.dll' -print | sort
   echo
+  echo "Bundled executables:"
+  find "$RUNTIME_ROOT" -maxdepth 1 -type f -name '*.exe' -print | sort
+  echo
   echo "Dependency report:"
-  for dll in "$RUNTIME_ROOT"/*.dll; do
-    echo "## $(basename "$dll")"
-    dll_dependencies "$dll"
+  for binary in "$RUNTIME_ROOT"/*.dll "$RUNTIME_ROOT"/*.exe; do
+    echo "## $(basename "$binary")"
+    dll_dependencies "$binary"
     echo
   done
 } >"$ARTIFACT_ROOT/$PACKAGE_NAME.manifest.txt"
 
-for dll in "$RUNTIME_ROOT"/*.dll; do
+for binary in "$RUNTIME_ROOT"/*.dll "$RUNTIME_ROOT"/*.exe; do
   while IFS= read -r dependency; do
     [[ -n "$dependency" ]] || continue
 
@@ -480,15 +500,16 @@ for dll in "$RUNTIME_ROOT"/*.dll; do
     fi
 
     if ! is_system_dll "$dependency_upper"; then
-      dll_dependencies "$dll" >&2
-      echo "Unexpected external dependency in $(basename "$dll"): $dependency" >&2
+      dll_dependencies "$binary" >&2
+      echo "Unexpected external dependency in $(basename "$binary"): $dependency" >&2
       exit 1
     fi
-  done < <(dll_dependencies "$dll")
+  done < <(dll_dependencies "$binary")
 done
 
-(
-  cd "$PACKAGE_ROOT"
-  zip -qj "$ARTIFACT_PATH" ./*.dll
-)
-echo "Created artifact: $ARTIFACT_PATH"
+# artifacts/ 中的 zip 由前置打包步骤生成，这里直接复制，不再重复压缩。
+if [[ ! -f "$ARTIFACT_PATH" ]]; then
+  echo "Pre-packaged artifact not found: $ARTIFACT_PATH" >&2
+  exit 1
+fi
+echo "Using pre-packaged artifact: $ARTIFACT_PATH"
