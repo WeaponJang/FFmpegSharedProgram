@@ -507,9 +507,11 @@ for binary in "$RUNTIME_ROOT"/*.dll "$RUNTIME_ROOT"/*.exe; do
   done < <(dll_dependencies "$binary")
 done
 
-# artifacts/ 中的 zip 由前置打包步骤生成，这里直接复制，不再重复压缩。
-if [[ ! -f "$ARTIFACT_PATH" ]]; then
-  echo "Pre-packaged artifact not found: $ARTIFACT_PATH" >&2
-  exit 1
-fi
-echo "Using pre-packaged artifact: $ARTIFACT_PATH"
+# Package the runtime DLLs/executables plus the manifest into the release zip.
+cp "$ARTIFACT_ROOT/$PACKAGE_NAME.manifest.txt" "$RUNTIME_ROOT/manifest.txt"
+rm -f "$ARTIFACT_PATH"
+(
+  cd "$RUNTIME_ROOT"
+  zip -r -9 "$ARTIFACT_PATH" .
+)
+echo "Packaged artifact: $ARTIFACT_PATH"
