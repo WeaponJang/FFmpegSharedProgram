@@ -1,11 +1,11 @@
-# FFmpegSharedLibraries
+# FFmpegSharedLibraries and Programs
 
 GitHub Actions workflows for building FFmpeg shared-library runtimes with software encoding, subtitle decoding and libass rendering, `libuavs3d` enabled, and `libdavs2` (from `davs2-10bit`) enabled in GPL builds.
 
 ## Outputs
 
 - `macos-15`: arm64 `.dylib`
-- `windows-latest`: win64 `.dll`
+- `windows-latest`: win64 `.dll & .exe`
 - `ubuntu-latest`: linux x64 `.so`
 
 Each runtime contains seven FFmpeg shared libraries. libass is linked statically into libavfilter, which also exports its public API; no separate libass runtime file is needed.
