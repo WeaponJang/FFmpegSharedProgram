@@ -4,11 +4,10 @@ GitHub Actions workflows for building FFmpeg shared-library runtimes with softwa
 
 ## Outputs
 
-- `macos-15`: arm64 `.dylib`
 - `windows-latest`: win64 `.dll & .exe`
-- `ubuntu-latest`: linux x64 `.so`
 
-Each runtime contains seven FFmpeg shared libraries. libass is linked statically into libavfilter, which also exports its public API; no separate libass runtime file is needed.
+Each runtime contains seven FFmpeg shared libraries and two FFmpeg programs. 
+libass is linked statically into libavfilter, which also exports its public API; no separate libass runtime file is needed.
 
 - `libuavs3d` is always built from source as a static dependency and linked into FFmpeg.
 - `libdavs2` (`davs2-10bit`) is built from source and linked statically when `license_flavor=gpl`.
@@ -189,68 +188,6 @@ package when these checks fail. Applications may keep ordinary preview available
 when libavfilter loads successfully but lacks subtitle APIs, and report the
 missing support when text subtitle rendering is requested.
 
-## Verification
-
-All workflows compile and run `tools/verify_runtime.c` against the **packaged**
-runtime before uploading it. This checks loading, ABI majors and registration of
-`cavs`, `libdra`, `libdavs2` and `libuavs3d` in the GPL builds, plus AV3A probing
-and parsing without an audio decoder. AV3A MP4, TS and raw-stream round trips
-also check codec configuration, packet boundaries and SHA-256 payload hashes.
-Subtitle checks cover decoder/filter availability, actual mov_text decoding, and
-libass output pixels with system fonts, animation, Unicode wrapping and seeking.
-Encoder checks require the software encoder list, round-trip short synthetic
-video through H.264, HEVC, MPEG-2, VP8/VP9 and AV1, and encode/drain in-memory
-AAC, AC-3, MP2, Opus and FLAC audio. High-bit-depth checks include H.264 10-bit,
-HEVC 10/12-bit and VP9/AV1 10-bit. H.264 and MPEG-2 also round-trip synthetic
-1920x1080 interlaced video at 25 frames/50 fields per second with both top- and
-bottom-field-first order, checking that decoded frames retain their scan type and field order.
-No external samples or audio output device are needed.
-
-The Windows build first checks static C++/pthread linkage with both GCC drivers
-using `tools/verify_windows_linkage.cpp`, including a thread and an exception.
-The complete static library group is passed as one linker argument so FFmpeg
-9's C++ driver selection cannot reorder the runtime libraries. Windows pkg-config
-link flags explicitly select the static winpthread archive, preventing encoder
-dependencies from mixing pthread DLL import libraries with the static runtime.
-Compiler-supplied C++/GCC runtime entries from pkg-config are filtered out; the
-explicit static C++ group and compiler driver provide those libraries instead.
-An explicit `-lgcc_s` would otherwise bypass `-static-libgcc` and add a DLL import.
-The linkage probe runs again with the encoder dependency flags before FFmpeg
-compilation. Packaged DLLs must still pass the final dependency check.
-
-The verifier also accepts a local sample. It decodes a bounded window, checks
-packet position metadata and key-packet provenance, then seeks, flushes and
-decodes another window with position export disabled. For example, after a
-macOS build:
-
-```sh
-ROOT=/absolute/path/to/work-root
-clang -O2 -Wall -Wextra -I"$ROOT/install/include" \
-  -I"$ROOT/subtitle-install/include" tools/verify_runtime.c \
-  "$ROOT/package/libavformat.63.dylib" \
-  "$ROOT/package/libavcodec.63.dylib" \
-  "$ROOT/package/libavutil.61.dylib" \
-  "$ROOT/package/libavdevice.63.dylib" \
-  "$ROOT/package/libavfilter.12.dylib" \
-  "$ROOT/package/libswscale.10.dylib" \
-  "$ROOT/package/libswresample.7.dylib" \
-  -o "$ROOT/package/verify_runtime"
-"$ROOT/package/verify_runtime" /path/to/AVS2.ts
-"$ROOT/package/verify_runtime" /path/to/DRA.ts dra
-"$ROOT/package/verify_runtime" /path/to/raw.cavs cavsvideo
-```
-
-Use `av3a` to verify an AV3A sample through MP4, TS and raw-stream remuxing
-without decoding (for example, `"$ROOT/package/verify_runtime" /path/to/sample.mp4 av3a`).
-MKV AV3A mapping is not included.
-
-Use `audio` to select the best audio track, `dra` to explicitly select a DRA
-track, or `cavsvideo` to force the raw CAVS demuxer. An optional fourth argument
-sets the frame limit (1–10000); limits above 64 replay TS input from byte zero
-after draining, which also supports short inputs containing a single keyframe.
-Sample files are not bundled
-with the repository or uploaded by the workflows.
-
 ## Third-Party Libraries
 
 - FFmpeg: https://ffmpeg.org/
@@ -273,9 +210,7 @@ with the repository or uploaded by the workflows.
 
 ## Workflows
 
-- [`.github/workflows/build-ffmpeg-runtime-macos.yml`](./.github/workflows/build-ffmpeg-runtime-macos.yml)
 - [`.github/workflows/build-ffmpeg-runtime-windows.yml`](./.github/workflows/build-ffmpeg-runtime-windows.yml)
-- [`.github/workflows/build-ffmpeg-runtime-linux.yml`](./.github/workflows/build-ffmpeg-runtime-linux.yml)
 
 ## Disc image input
 
